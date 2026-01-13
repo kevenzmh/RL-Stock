@@ -1,8 +1,9 @@
 import os
 import pickle
 import pandas as pd
-from stable_baselines.common.policies import MlpPolicy
+# 使用正确的导入路径
 from stable_baselines.common.vec_env import DummyVecEnv
+from stable_baselines.common.policies import MlpPolicy
 from stable_baselines import PPO2
 from rlenv.StockTradingEnv0 import StockTradingEnv
 
@@ -83,7 +84,7 @@ def multi_stock_trade():
 
 if __name__ == '__main__':
     # multi_stock_trade()
-    test_a_stock_trade('sh.600036')
+    test_a_stock_trade('sh.510600')
     # ret = find_file('./stockdata/train', '600036')
     # print(ret)
 
