@@ -24,7 +24,11 @@ def stock_trade(stock_file):
     # The algorithms require a vectorized environment to run
     env = DummyVecEnv([lambda: StockTradingEnv(df)])
 
-    model = PPO2(MlpPolicy, env, verbose=0, tensorboard_log='./log')
+    # 确保log目录存在
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'log')
+    os.makedirs(log_dir, exist_ok=True)
+    
+    model = PPO2(MlpPolicy, env, verbose=0, tensorboard_log=log_dir)
     model.learn(total_timesteps=int(1e4))
 
     df_test = pd.read_csv(stock_file.replace('train', 'test'))
@@ -84,7 +88,7 @@ def multi_stock_trade():
 
 if __name__ == '__main__':
     # multi_stock_trade()
-    test_a_stock_trade('sh.510600')
+    test_a_stock_trade('sh.000001')
     # ret = find_file('./stockdata/train', '600036')
     # print(ret)
 

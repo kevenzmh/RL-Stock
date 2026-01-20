@@ -6,12 +6,13 @@ model
 log
 .vscode/
 *.pkl
-
+img
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-
+log_improved
+models
 # C extensions
 *.so
 
