@@ -6,6 +6,7 @@ model
 log
 .vscode/
 *.pkl
+log_enhanced
 img
 # Byte-compiled / optimized / DLL files
 __pycache__/
