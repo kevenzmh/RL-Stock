@@ -281,9 +281,15 @@ class StockTradingEnvEnhanced(gym.Env):
             self.df = new_df
 
         # 随机开始位置,但确保有足够的数据计算技术指标
-        min_start = 60  # 需要至少60个数据点来计算MA60
-        max_start = max(min_start, len(self.df) - 100)
-        self.current_step = random.randint(min_start, max_start)
+        # 修复：确保不会越界
+        min_start = min(60, len(self.df) - 10)  # 至少留10个交易日
+        max_start = len(self.df) - 10  # 确保至少有10步可以交易
+        
+        # 如果数据太少，从头开始
+        if max_start < min_start or max_start < 0:
+            self.current_step = 0
+        else:
+            self.current_step = random.randint(min_start, max_start)
 
         return self._next_observation()
 
