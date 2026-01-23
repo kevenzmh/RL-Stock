@@ -1,6 +1,6 @@
 """
-模型推理引擎 - 修复版
-加载训练好的模型进行在线预测
+智能模型推理引擎
+自动识别19维或32维模型
 """
 import os
 import sys
@@ -10,16 +10,16 @@ import pandas as pd
 from stable_baselines.common.vec_env import DummyVecEnv
 from stable_baselines import PPO2
 
-# 添加项目路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from rlenv.StockTradingEnv_enhanced import StockTradingEnvEnhanced
+from rlenv.StockTradingEnv0 import StockTradingEnv  # 19维
+from rlenv.StockTradingEnv_enhanced import StockTradingEnvEnhanced  # 32维
 from utils.technical_indicators import add_all_technical_indicators
 from utils.data_preprocessing import DataPreprocessor
 
 
 class ModelInference:
-    """模型推理引擎"""
+    """智能模型推理引擎"""
     
     def __init__(self, model_path=None):
         """
@@ -32,8 +32,10 @@ class ModelInference:
         self.model = None
         self.preprocessor = DataPreprocessor(method='robust')
         self.initial_balance = 10000
+        self.model_dim = None  # 模型维度（19或32）
         
         self._load_model()
+        self._detect_model_dimension()
     
     def _find_best_model(self):
         """自动查找最佳模型"""
@@ -42,11 +44,12 @@ class ModelInference:
         if not os.path.exists(models_dir):
             raise FileNotFoundError(f"模型目录不存在: {models_dir}")
         
-        # 优先级顺序 - zip格式优先（更可靠）
+        # 优先级顺序
         priority_models = [
-            'quick_test_model.zip',
-            'ppo2_enhanced_100000.pkl',
-            'ppo2_stock_100000.pkl',
+            'ppo2_enhanced_32d.zip',       # 32维增强模型（最新）
+            'ppo2_enhanced_100000.pkl',    # 旧版
+            'quick_test_model.zip',        # 19维测试模型
+            'ppo2_stock_100000.pkl',       # 旧版
         ]
         
         for model_name in priority_models:
@@ -61,62 +64,39 @@ class ModelInference:
         """加载模型 - 支持多种格式"""
         print(f"\n加载模型: {self.model_path}")
         
-        # 方法1: 使用PPO2.load() - 推荐方法
         try:
-            print("尝试方法1: PPO2.load()...")
+            print("尝试 PPO2.load()...")
             self.model = PPO2.load(self.model_path)
-            print("✓ 模型加载成功 (PPO2.load)")
+            print("✓ 模型加载成功")
             return
-        except Exception as e1:
-            print(f"  方法1失败: {e1}")
-        
-        # 方法2: 如果是zip文件，尝试去掉扩展名
-        if self.model_path.endswith('.zip'):
-            try:
-                print("尝试方法2: 无扩展名加载...")
-                model_path_no_ext = self.model_path[:-4]  # 去掉.zip
-                self.model = PPO2.load(model_path_no_ext)
-                print("✓ 模型加载成功 (无扩展名)")
-                return
-            except Exception as e2:
-                print(f"  方法2失败: {e2}")
-        
-        # 方法3: 对于pkl文件，尝试其他加载方式
-        if self.model_path.endswith('.pkl'):
-            # 尝试查找对应的zip文件
-            zip_path = self.model_path.replace('.pkl', '.zip')
-            if os.path.exists(zip_path):
-                try:
-                    print(f"尝试方法3: 加载对应的zip文件...")
-                    self.model = PPO2.load(zip_path)
-                    print("✓ 模型加载成功 (对应zip)")
-                    self.model_path = zip_path  # 更新路径
-                    return
-                except Exception as e3:
-                    print(f"  方法3失败: {e3}")
-        
-        # 所有方法都失败
-        error_msg = f"""
-模型加载失败！
-
-可能的原因:
-1. 模型文件格式不兼容
-2. stable_baselines版本不匹配
-3. 模型保存时使用了不同的方法
-
-建议解决方案:
-1. 使用 quick_test_model.zip（如果存在）
-2. 重新训练并保存模型:
-   python main_enhanced.py
-3. 确保使用的是 stable_baselines 2.10.0
-
-当前尝试的路径: {self.model_path}
-"""
-        raise Exception(error_msg)
+        except Exception as e:
+            print(f"✗ 加载失败: {e}")
+            raise Exception(f"模型加载失败: {e}")
+    
+    def _detect_model_dimension(self):
+        """检测模型的观察空间维度"""
+        try:
+            obs_space = self.model.observation_space
+            if hasattr(obs_space, 'shape'):
+                self.model_dim = obs_space.shape[0]
+                print(f"✓ 检测到模型维度: {self.model_dim}维")
+                
+                if self.model_dim == 19:
+                    print("  → 使用原始环境 (StockTradingEnv)")
+                elif self.model_dim == 32:
+                    print("  → 使用增强环境 (StockTradingEnvEnhanced)")
+                else:
+                    print(f"  ⚠ 未知维度: {self.model_dim}")
+            else:
+                print("⚠ 无法检测模型维度，默认使用19维")
+                self.model_dim = 19
+        except Exception as e:
+            print(f"⚠ 检测维度失败: {e}，默认使用19维")
+            self.model_dim = 19
     
     def preprocess_data(self, df, fit=False):
         """
-        预处理数据（与训练时保持一致）
+        预处理数据
         
         Args:
             df: 原始数据
@@ -125,18 +105,33 @@ class ModelInference:
         Returns:
             处理后的DataFrame
         """
-        # 1. 添加技术指标
-        df = add_all_technical_indicators(df)
+        # 根据模型维度决定是否添加技术指标
+        if self.model_dim == 32:
+            # 32维：添加技术指标
+            df = add_all_technical_indicators(df)
+        else:
+            # 19维：确保有必需的基础列
+            required_cols = ['open', 'high', 'low', 'close', 'volume', 'amount', 
+                            'tradestatus', 'pctChg', 'peTTM', 'pbMRQ', 'psTTM']
+            
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            if missing_cols:
+                for col in missing_cols:
+                    df[col] = 0
+            
+            if 'adjustflag' not in df.columns:
+                df['adjustflag'] = 3
         
-        # 2. 数据预处理
+        # 数据预处理
         df = self.preprocessor.preprocess_pipeline(
             df,
             fit=fit,
             handle_missing=True,
-            handle_outliers_flag=True,
-            normalize=False  # 不标准化，保持原始特征
+            handle_outliers_flag=False,
+            normalize=False
         )
         
+        df = df.reset_index(drop=True)
         return df
     
     def predict_single_stock(self, df, return_details=False):
@@ -150,8 +145,11 @@ class ModelInference:
         Returns:
             dict: 预测结果
         """
-        # 创建环境 (StockTradingEnvEnhanced不需要initial_balance参数)
-        env = DummyVecEnv([lambda: StockTradingEnvEnhanced(df)])
+        # 根据模型维度选择环境
+        if self.model_dim == 32:
+            env = DummyVecEnv([lambda: StockTradingEnvEnhanced(df)])
+        else:
+            env = DummyVecEnv([lambda: StockTradingEnv(df)])
         
         # 重置环境
         obs = env.reset()
@@ -188,15 +186,15 @@ class ModelInference:
         returns = np.diff([self.initial_balance] + [self.initial_balance + p for p in rewards_history])
         volatility = np.std(returns) if len(returns) > 0 else 0
         
-        # 计算夏普比率 (简化版)
+        # 计算夏普比率
         sharpe = total_return / (volatility + 1e-6) if volatility > 0 else 0
         
-        # 综合评分 (0-100)
+        # 综合评分
         score = self._calculate_score(total_return, sharpe, max_profit, min_profit)
         
         result = {
             'score': score,
-            'total_return': total_return * 100,  # 百分比
+            'total_return': total_return * 100,
             'total_profit': total_profit,
             'max_profit': max_profit,
             'min_profit': min_profit,
@@ -214,21 +212,10 @@ class ModelInference:
         return result
     
     def _calculate_score(self, total_return, sharpe, max_profit, min_profit):
-        """
-        计算综合评分 (0-100)
-        
-        综合考虑:
-        - 总收益率 (50%)
-        - 夏普比率 (30%)
-        - 最大回撤 (20%)
-        """
-        # 收益得分 (0-50)
+        """计算综合评分 (0-100)"""
         return_score = min(50, max(0, total_return * 1000))
-        
-        # 夏普得分 (0-30)
         sharpe_score = min(30, max(0, sharpe * 10))
         
-        # 回撤得分 (0-20)
         if max_profit > 0:
             max_drawdown = (max_profit - min_profit) / max_profit
         else:
@@ -236,7 +223,6 @@ class ModelInference:
         drawdown_score = max(0, 20 * (1 - max_drawdown))
         
         total_score = return_score + sharpe_score + drawdown_score
-        
         return round(total_score, 2)
     
     def _get_recommendation(self, score, total_return):
@@ -251,28 +237,14 @@ class ModelInference:
             return "不推荐"
     
     def predict_batch(self, stock_data_dict, verbose=True):
-        """
-        批量预测多只股票
-        
-        Args:
-            stock_data_dict: {stock_code: DataFrame}
-            verbose: 是否显示进度
-        
-        Returns:
-            DataFrame: 预测结果表
-        """
+        """批量预测多只股票"""
         results = []
         total = len(stock_data_dict)
         
         for i, (stock_code, df) in enumerate(stock_data_dict.items(), 1):
             try:
-                # 预处理数据
                 df_processed = self.preprocess_data(df.copy(), fit=False)
-                
-                # 预测
                 prediction = self.predict_single_stock(df_processed)
-                
-                # 添加股票代码
                 prediction['stock_code'] = stock_code
                 results.append(prediction)
                 
@@ -285,54 +257,28 @@ class ModelInference:
                     print(f"[{i}/{total}] ✗ {stock_code}: {str(e)}")
                 continue
         
-        # 转换为DataFrame
         if len(results) == 0:
             return pd.DataFrame()
         
         df_results = pd.DataFrame(results)
-        
-        # 排序 (按得分降序)
         df_results = df_results.sort_values('score', ascending=False).reset_index(drop=True)
         
         return df_results
     
     def get_top_stocks(self, stock_data_dict, top_n=10, min_score=30):
-        """
-        获取Top N只股票
-        
-        Args:
-            stock_data_dict: {stock_code: DataFrame}
-            top_n: 返回前N只
-            min_score: 最低分数要求
-        
-        Returns:
-            DataFrame: Top N股票
-        """
-        # 批量预测
+        """获取Top N只股票"""
         results = self.predict_batch(stock_data_dict, verbose=True)
         
         if len(results) == 0:
             return pd.DataFrame()
         
-        # 过滤低分股票
         results = results[results['score'] >= min_score]
-        
-        # 返回Top N
         return results.head(top_n)
 
 
 # 便捷函数
 def predict_stock(stock_code, df):
-    """
-    预测单只股票的便捷函数
-    
-    Args:
-        stock_code: 股票代码
-        df: 股票数据
-    
-    Returns:
-        dict: 预测结果
-    """
+    """预测单只股票的便捷函数"""
     engine = ModelInference()
     df_processed = engine.preprocess_data(df.copy())
     result = engine.predict_single_stock(df_processed, return_details=True)
@@ -340,23 +286,16 @@ def predict_stock(stock_code, df):
     return result
 
 
-# 测试代码
 if __name__ == "__main__":
     print("="*60)
-    print("模型推理引擎测试")
+    print("智能模型推理引擎测试")
     print("="*60)
-    
-    # 测试: 使用现有数据
-    print("\n测试: 预测招商银行")
-    print("-"*60)
     
     test_file = 'stockdata/test/sh.600036.csv'
     
     if os.path.exists(test_file):
         df = pd.read_csv(test_file)
         df = df.sort_values('date').reset_index(drop=True)
-        
-        # 只用最近60天
         df = df.tail(60)
         
         try:
@@ -366,10 +305,7 @@ if __name__ == "__main__":
             print(f"股票代码: {result['stock_code']}")
             print(f"综合得分: {result['score']:.2f}")
             print(f"收益率: {result['total_return']:.2f}%")
-            print(f"总利润: {result['total_profit']:.2f}元")
-            print(f"夏普比率: {result['sharpe_ratio']:.2f}")
             print(f"推荐等级: {result['recommendation']}")
-            print(f"交易次数: {result['steps']} 步")
         
         except Exception as e:
             print(f"✗ 失败: {e}")
@@ -379,5 +315,3 @@ if __name__ == "__main__":
         print(f"✗ 测试文件不存在: {test_file}")
     
     print("\n" + "="*60)
-    print("测试完成!")
-    print("="*60)

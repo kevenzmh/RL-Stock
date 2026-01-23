@@ -8,6 +8,7 @@ log
 *.pkl
 log_enhanced
 img
+log_enhanced_32d
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
